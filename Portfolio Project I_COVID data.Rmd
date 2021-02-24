@@ -1,0 +1,399 @@
+---
+title: "Portfolio Project I"
+author: Ming Tan
+subtitle: "COVID-19 Data Analysis"
+output: html
+html_notebook: default
+--- 
+
+## Load the required pacakges
+
+```{r message=FALSE}
+library(tidyr)       ## for data manipulation - e.g. pivoting
+library(dplyr)      ## for %>% pipe operator
+library(lubridate)  ## for date manipulation
+library(MVN)        ## to detect and remove multivariate outliers
+library(magrittr)  ## required to use the %<>% pipe command - makes easier to read the code and %<>% allows to reassign variable  
+library(ggplot2)   ## to create bar plots or histograms
+library(stringr)    ## for string manipulation, e.g. concatenate strings
+library(gridExtra)  # Provides a number of user-level functions to work with "grid" graphics, notably to arrange multiple grid-based plots on a page, and draw tables (par(mfrow()) does not work with ggplot2 package to arrange multiple plots in one page
+library(forecast)  ## for Box-Cox transformation
+```
+
+## I - Data source and Background
+
+The source of the dataset chosen for analyses is from "Our World in Data" [link] https://ourworldindata.org/coronavirus (Coronavirus Pandemic (COVID-19) - Statistics and Research - Our World in Data).
+
+The data on this website pertains to the coronavirus pandemic. Up to date data on confirmed cases, deaths, hospitalizations, testing, and vaccinations is published throughout the duration of the COVID-19 pandemic.
+
+The data has been collated from several contributing sources, for example confirmed cases and deaths data comes from John Hopkins University. Vaccination information is collected by the data team in 'Our World in Data' from official reports.
+
+The complete Our World in Data covid-19 dataset is made available for download in CSV, XLSX and JSON formats from their github site ([link] https://github.com/owid/covid-19-data/tree/master/public/data) and includes the historical data on the pandemic till current. 
+
+They have also made available smaller datasets for example (available as CSV, XLSX and JSON formats):
+
+* latest information on COVID-19 cases  (i will refer to it as the covid dataset)
+* COVID-19 vaccinations for each country  (i will refer to it as the vaccination dataset)
+
+I have chosen to use the 2 smaller datasets mentioned above and download the datasets in CSV format to save on my computer. The data which I have downloaded contains data on or before 15 Feb 2021 for covid dataset, on or before 13 Feb 2021 for vaccination dataset.
+
+Link to the covid dataset: [link] https://github.com/owid/covid-19-data/blob/master/public/data/owid-covid-data.csv
+
+Link to the vaccination dataset: [link] https://github.com/owid/covid-19-data/blob/master/public/data/vaccinations/vaccinations.csv
+
+The original dataset has 59 variables in the covid dataset and 12 variables in the vaccinations dataset. I will however, not use all the variables, but a subset of the data, selecting 11 of the covid dataset variables and all 12 variables from the vaccination dataset. In each of the datasets, the cases and vaccinations are updated by date for each country. 
+
+The key columns by which I will use to merge the 2 datasets to create a final dataset for analysis is the country ISO code (iso_code) and the date (date) as i only want to use matching data by country and date. I am interested to find out if vaccination has an impact on new cases or new deaths reported.
+
+#### Variable descriptions
+
+##### owid-covid-data.csv - 'Data on COVID-19 (coronavirus)' (Our World in Data, The complete Our World in Data COVID-19 dataset )
+
+Variable Name      |   Description
+-------------      |   -----------
+1. iso_code:	     |   ISO 3166-1 alpha-3 three-letter country codes
+2. continent:	     |   Continent of the geographical location
+3. location:	     |   Geographical location
+4. date:	         |   Date of observation
+5. total_cases:	   |   Total confirmed cases of COVID-19
+6. new_cases:	     |   New confirmed cases of COVID-19
+7. total_deaths:	 |   Total deaths attributed to COVID-19
+8. new_deaths:	   |   New deaths attributed to COVID-19
+9. population:	   |   Population in 2020
+10. population_density:	| Number of people divided by land area, measured in square kilometers, most recent year available
+11. median_age:	   |   Median age of the population, UN projection for 2020
+
+
+##### Vaccinations.csv  - 'Data on COVID-19 (coronavirus) vaccinations' (Our World in Data, Vaccination Data)
+
+Variable Name      |   Description
+-------------      |   -----------
+1. location:       |   name of the country (or region within a country).
+2. iso_code:       |   ISO 3166-1 alpha-3 – three-letter country codes.
+3. date:           |   date of the observation.
+4. total_vaccinations:  |   total number of doses administered. This is counted as a single dose, and may not equal the total number of people vaccinated, depending on the specific dose regime (e.g. people receive multiple doses). If a person receives one dose of the vaccine, this metric goes up by 1. If they receive a second dose, it goes up by 1 again.
+5. total_vaccinations_per_hundred: |  total_vaccinations per 100 people in the total population of the country.
+6. daily_vaccinations_raw:    | daily change in the total number of doses administered. It is only calculated for consecutive days. This is a raw measure provided for data checks and transparency, but we strongly recommend that any analysis on daily vaccination rates be conducted using daily_vaccinations instead.
+7. daily_vaccinations:  |  new doses administered per day (7-day smoothed). For countries that don't report data on a daily basis, we assume that doses changed equally on a daily basis over any periods in which no data was reported. This produces a complete series of daily figures, which is then averaged over a rolling 7-day window. 
+8. daily_vaccinations_per_million: |   daily_vaccinations per 1,000,000 people in the total population of the country.
+9. people_vaccinated: |   total number of people who received at least one vaccine dose. If a person receives the first dose of a 2-dose vaccine, this metric goes up by 1. If they receive the second dose, the metric stays the same.
+10. people_vaccinated_per_hundred: |   people_vaccinated per 100 people in the total population of the country.
+11. people_fully_vaccinated:    | total number of people who received all doses prescribed by the vaccination protocol. If a person receives the first dose of a 2-dose vaccine, this metric stays the same. If they receive the second dose, the metric goes up by 1.
+12. people_fully_vaccinated_per_hundred: |   people_fully_vaccinated per 100 people in the total population of the country.
+
+###### 1. Read covid dataset csv file
+
+```{r}
+covid <- read.csv("owid-covid-data.csv")    
+
+## select a subset of the data of the following 11 variables:
+
+covid <- covid[,c("iso_code","continent","location","date","total_cases","new_cases","total_deaths","new_deaths","population","population_density","median_age")]  
+
+```
+
+```{r eval=FALSE}
+head(covid)      ## display first few rows of observations
+
+```
+###### 2. Read the vaccinations dataset csv file
+
+```{r}
+vaccinations <- read.csv("vaccinations.csv")       ## read vaccination data csv file
+```
+
+```{r eval=FALSE  }
+head(vaccinations)               ## display first few rows of observations
+
+```
+
+###### 3. Merge the datasets - purpose is to compare vaccination data against cases since vaccinations started.
+
+###### a. Check to see when vaccinations records started versus when covid cases were recorded (we know for a fact that vaccination records definitely started much later). Using the summarise function in dplyr package, i can find out the earliest date in both datasets with the min() function.
+
+```{r}
+vaccinations %>% summarise(min_vac_date = min(date))   ## indicates vaccinations started in 13 Dec 2020
+
+covid %>% summarise(min_covid_date = min(date))        ## indicates covid data collection started 1st Jan 2020
+```
+
+###### b. Merge the covid data to the vaccination data. Vaccination data will be the primary table to use and then get the related covid data for the matching vaccination dates. As a result the merged file will have dates of cases starting from the vaccination dates
+
+###### c. Define the columns on which to merge the datasets
+
+```{r}
+
+merge_cols <- c("iso_code", "date")     
+
+```
+
+###### d. Get matching rows from both datasets by using the inner_join function from dplyr package:
+
+```{r}
+
+## vaccinations is the left dataset, covid is the right dataset. Merged by iso_code and date. inner_join will fetch all matching values from the left and right datasets
+
+merged_df <- vaccinations %>% 
+  inner_join(covid, by = merge_cols)   
+```
+
+###### e. Display the merged data
+
+```{r}
+names(merged_df)  
+
+```
+
+## II - Understand the data
+
+###### 1a. In order to understand the data, check the structure using str(), get descriptive statistics using summary() function and its attributes using class() 
+
+```{r eval=FALSE}
+str(merged_df)                  ## firstly, check structure of the variables
+
+merged_df %>% sapply(class)     ## find out the class of the variables using the apply() function on all the variables
+                                ## sapply allows to perform the class() function on all the variables, like a for loop
+
+```
+
+###### b. Confirm if the numeric variables are of floating type (double). Again, using sapply function with typeof() on the variables with class numeric (i.e. columns 9 - 11, 15 - 21)
+
+```{r eval=FALSE}
+
+merged_df[c(9:11,15:21)] %>% sapply(typeof)
+
+```
+
+###### 2. Observations:
+
+###### a. There are a total of 2945 rows and 21 variables in the merged data set
+
+###### b. There are 4 character variables which are qualitative data type : Location.x, iso_code, continent, location.y
+
+###### c. iso_code and continent are categorical (factor) variables and should be converted to a factor variable
+
+###### d. date is a date variable and should be in date format for data manipulation
+
+###### e. The following are quantitative, discrete variables of integer type: total_vaccinations, people_vaccinated, people_fully_vaccinated, daily_vaccinations_raw, daily_vaccinations, daily_vaccinations_per_million. In order to analyse for outliers, need to convert to numeric (floating)
+
+###### f. The following are quantitative, continuous variables type numeric (double/floating): total_vaccinations_per_hundred, people_vaccinated_per_hundred, total_cases, new_cases, total_deaths, new_deaths, population, population_density, median_age
+
+###### g. The dataset is a data frame
+
+```{r eval=FALSE}
+summary(merged_df)   ## descriptive statistics of the dataset
+```
+
+###### h. Some of the variables have missing values
+
+###### 3. Perform conversions of the variables:
+
+###### a. Convert date from character to date format
+
+```{r}
+merged_df$date <- as.Date(merged_df$date)
+
+```
+###### b. iso_code and continent are category and should be a factor variables, convert them.
+
+```{r}
+merged_df$iso_code <- as.factor(merged_df$iso_code)
+merged_df$continent <- as.factor(merged_df$continent)
+
+```
+###### c. convert some integer variables (columns 4 - 7) to floating (double) - for later to use when checking for outliers
+
+```{r}
+merged_df[,4:7] %<>% sapply(as.numeric) ## convert a few variables to numeric using sapply()
+
+merged_df[,4:7] %>% sapply(typeof)     ## confirm that they are converted to double
+
+```
+###### 4. after conversion, the iso_code and continent are now factor variables, and date is in date format. The resulting dataframe has now only 16 variables
+
+
+## III  - Tidy & Manipulate Data
+
+###### 1. Remove some variables.
+
+###### a. The following variables in the merged dataset will not be used in the analysis, so will be dropped: daily_vaccinations_raw, total_vaccinations_per_hundred, people_vaccinated_per_hundred, daily_vaccinations_per_million
+
+###### b. location.y variable is from the merging, and is duplicated variable with location.x so will also be dropped
+
+```{r}
+
+## use select() to keep or drop columns 
+
+merged_df %<>% dplyr::select(- c(daily_vaccinations_raw, total_vaccinations_per_hundred, people_vaccinated_per_hundred, daily_vaccinations_per_million, location.y))
+
+```
+
+###### 2. Rename the variables location.x and people_fully_vaccinated_per_hundred so that it is easier to understand
+
+```{r}
+merged_df %<>% rename(country = location.x, Percent_Fully_Vaccinated = people_fully_vaccinated_per_hundred)
+
+```
+
+###### 3. rearrange the columns (re-ordering the columns will keep similar information together / looks more readable)
+```{r}
+merged_df <- merged_df[,c(1:2,9,3:8,10:16)]
+nrow(merged_df)
+length(merged_df)
+
+```
+
+###### 4. Display the summary statistics of the dataset:
+
+```{r eval=FALSE}
+head(merged_df)
+
+summary(merged_df)
+
+unique(merged_df$iso_code)
+
+```
+###### 5. Observations:
+
+###### a. There are no columns which have more than one variable stored in a column (no action required)
+
+###### b. There are entries for iso_code which is not a valid country, ie. OWID_EUN, OWID_NCY and OWID_WRL we will exclude these from the dataset. Use the filter function to filter out the rows with unwanted iso codes:
+
+```{r}
+
+merged_df %<>% filter(!(iso_code %in% c("OWID_EUN", "OWID_NCY", "OWID_WRL")))   ## exclude iso_codes
+
+nrow(merged_df)               ## number of observations
+```
+###### c. Resulting dataset has 82 iso_codes and 2,824 observations
+
+###### d. The date may be further split into week, month and year using lubridate package 
+
+###### i) For month, display the abbreviated name of the month (as a character variable) instead of the number of the month by specifying additional arguments with month(). label = TRUE displays the month name and abbr=TRUE will display the month name in abbreviated form, e.g. Jan instead of January
+
+###### ii) week() extracts the number of the week in the year as numeric
+
+###### iii) year() extracts the year as a numeric
+
+```{r eval=FALSE}
+
+merged_df %<>% mutate(weeknum = lubridate::week(date),
+                         mon = lubridate::month(date, label = TRUE, abbr = TRUE),
+                         year = lubridate:: year(date)) 
+
+names(merged_df)    ## check that the new variables exist
+
+```
+###### g. Pivot the data and reduce the number of rows using pivot_wider()
+
+###### i). Filter each country's data for earliest date recorded in the dataset
+
+```{r}
+
+merged_df_min <- merged_df %>% 
+  group_by(iso_code) %>% 
+  slice(which.min(date)) %>%
+  mutate(Period = "Start")
+
+```
+
+###### ii). Filter each country's data for the latest date recorded in the dataset
+
+```{r}
+merged_df_max <- merged_df %>% 
+  group_by(iso_code) %>% 
+  slice(which.max(date)) %>%
+  mutate(Period = "End")
+```
+
+###### iii). Append the rows from the max date table (merged_df_max) to the min date table (merged_df_min) using bind_rows(). Arrange the rows by country iso code (purpose to compare if the cases have reduced since vaccination commenced). Then rearrange the variables so that the new variable (Period) is next to the date
+
+```{r}
+merged_df2 <- merged_df_min %>%         ## specify merged_df_min as first argument
+  bind_rows(merged_df_max) %>%          ## merged_df_max as second argument will append merged_df_max to merged_df_min
+  arrange(iso_code) %>%                 ## sort iso_code in alphabetical order by default ascending if no argument specified
+  dplyr::select(c(1:4,17,5:16))        ## rearrange the columns so easier to read
+
+```
+
+###### iv). Use pivot_wider() to transform the rows to columns to get new columns, i.e widens the data
+
+###### - only selected columns to be included in the pivoted dataset using select()
+###### - in  pivot_wider, the column to get the names (to transform to columns) is specified with names_from = Period
+###### - the column to get the cell values from are from several columns (people_fully_vaccinated, total_cases,new_cases,total_deaths,new_deaths). values_from is a vector with all the variables
+###### - then rename and/or drop some variables (people_fully_vaccinated_Start) 
+
+```{r}
+
+merged_df2_w <- merged_df2 %>% 
+              dplyr::select(iso_code,country, Period, people_fully_vaccinated, total_cases, total_deaths, new_cases, new_deaths) %>% 
+              pivot_wider(names_from = Period, values_from = c(people_fully_vaccinated, total_cases,total_deaths,new_cases,new_deaths ))
+
+
+```
+
+###### v). Using the pivoted dataset, merged_df2_w, we can create more variables - Change in total cases, change in total deaths, change in new cases reported and change in new deaths reported, and then drop some variables
+
+```{r}
+
+## replace NA's with 0 so that we can perform computation and mutate variables
+
+for (i in 3:5) {
+  merged_df2_w[i][is.na(merged_df2_w[i])] <- 0
+}
+
+merged_df2_w %<>% dplyr::mutate(total_vaccinations = people_fully_vaccinated_End - people_fully_vaccinated_Start,
+                        new_cases_chg = new_cases_End - new_cases_Start,
+                        new_deaths_chg = new_deaths_End - new_deaths_Start)  %>%
+                  dplyr::select(iso_code,country, total_vaccinations, new_cases_chg, new_deaths_chg) %>%
+                  dplyr::arrange(desc(total_vaccinations))
+
+
+```
+
+###### Plot the vaccination for top 20 countries to date
+
+```{r}
+
+## Plot countries with top 20 vaccination numbers to date
+
+df_plot_bar_vac <- merged_df2_w[1:20,c(1,3)] ## vaccination data all countries
+
+p1 <- ggplot(df_plot_bar_vac, aes(x=reorder(iso_code,-total_vaccinations), y=total_vaccinations/1000000)) + 
+  geom_bar(stat = "identity", color="#3399FF") +
+  labs(title = str_glue("Bar Chart of Total World Vaccination for top 20 countries from Dec 20 - Feb 21")) +
+  xlab("Country") +
+  ylab("Count  in '000,000") +
+  theme(plot.title =  element_text(size =8), axis.text = element_text(size=7),legend.position = "none")
+
+```
+
+###### Plot the Cases and Deaths, sorted by top 20 vaccination countries
+
+```{r fig.width=10, fig.height=5}
+
+df_plot_bar <- merged_df2_w[1:20,] %>% 
+  pivot_longer(col = c(new_cases_chg, new_deaths_chg), names_to = "Category", values_to = "Change")
+
+
+df_plot_bar$Change <- as.integer(df_plot_bar$Change)
+df_plot_bar$Category <- factor(df_plot_bar$Category, levels=c("new_cases_chg", "new_deaths_chg"), labels = c("Change in new cases","Change in new deaths"))
+
+p2 =  ggplot(df_plot_bar, aes(x=reorder(iso_code, -total_vaccinations), y=Change, fill=Category)) + 
+  geom_bar(stat = "identity", color = "#3399FF", position = "dodge") +
+  labs(title = str_glue("Bar Chart of Change in World Cases and Deaths from Dec 20 - Feb 21")) +
+  xlab("Country") +
+  ylab("Change") +
+  theme(plot.title =  element_text(size =8), axis.text = element_text(size=7),legend.position = "bottom")
+
+
+grid.arrange(p1,p2,ncol=1)
+```
+In Conclusion, it appears the vaccination program is looking to be effective in bringing down the number of new cases reported. THis is very evident especially in US where there are extremely high number of cases. USA was the earliest reported to have started vaccination way back in Dec, and based on people fully vaccinated to date in the US (where more than 1.3 mil people have been fully vaccinated), there has been significant drop in new cases as they are also the most vaccinated country. It also appears to be working in a lot of other countries who have started the vaccination program.
+
+
+#### Reference list
+
+Max Roser, Hannah Ritchie, Esteban Ortiz-Ospina and Joe Hasell (2020) - "Coronavirus Pandemic (COVID-19)". Published online at OurWorldInData.org. Retrieved from: 'https://ourworldindata.org/coronavirus' [Online Resource]
+
+
